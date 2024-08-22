@@ -54,6 +54,7 @@ class CustomJSONEncoder(json.JSONEncoder):
 mta = Mtapi(
     app.config['MTA_KEY'],
     app.config['STATIONS_FILE'],
+    app.config['STOPS_FILE'],
     max_trains=app.config['MAX_TRAINS'],
     max_minutes=app.config['MAX_MINUTES'],
     expires_seconds=app.config['CACHE_SECONDS'],
@@ -122,6 +123,22 @@ def by_route(route):
     try:
         data = mta.get_by_route(route)
         return _make_envelope(data)
+    except KeyError as e:
+        resp = Response(
+            response=json.dumps({'error': 'Station not found'}),
+            status=404,
+            mimetype="application/json"
+        )
+
+        return add_cors_header(resp)
+    
+@app.route('/all-routes', methods=['GET'])
+@response_wrapper
+def all_routes():
+
+    try:
+        data = mta.all_routes()
+        return data
     except KeyError as e:
         resp = Response(
             response=json.dumps({'error': 'Station not found'}),

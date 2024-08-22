@@ -67,7 +67,7 @@ class Mtapi(object):
         'https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/nyct%2Fgtfs-g'  # G
     ]
 
-    def __init__(self, key, stations_file, expires_seconds=60, max_trains=10, max_minutes=30, threaded=False):
+    def __init__(self, key, stations_file, stops_file, expires_seconds=60, max_trains=10, max_minutes=30, threaded=False):
         self._KEY = key
         self._MAX_TRAINS = max_trains
         self._MAX_MINUTES = max_minutes
@@ -76,6 +76,7 @@ class Mtapi(object):
         self._stations = {}
         self._stops_to_stations = {}
         self._routes = {}
+        self._stops = {}
         self._read_lock = threading.RLock()
 
         # initialize the stations database
@@ -88,6 +89,19 @@ class Mtapi(object):
 
         except IOError as e:
             print('Couldn\'t load stations file '+stations_file)
+            exit()
+
+        try:
+            with open(stops_file, 'r') as f:
+                stops_reader = csv.reader(f)
+                headers = next(stops_reader)
+                for row in stops_reader:
+                    #print(row)
+                    self._stops[row[0]] = {"name":row[1], "stopped_at":0}
+
+
+        except IOError as e:
+            print('Couldn\'t load stops file '+stops_file)
             exit()
 
         self._update()
@@ -123,10 +137,14 @@ class Mtapi(object):
 
         # create working copy for thread safety
         stations = copy.deepcopy(self._stations)
+        stops = copy.deepcopy(self._stops)
 
         # clear old times
         for id in stations:
             stations[id].clear_train_data()
+        #clear stopped at
+        for stop_id in stops.keys():
+            stops[stop_id]["stopped_at"] = 0
 
         routes = defaultdict(set)
 
@@ -140,6 +158,22 @@ class Mtapi(object):
 
             for entity in mta_data.entity:
                 trip = Trip(entity)
+
+                stop = entity.vehicle.stop_id
+                status = entity.vehicle.current_status
+
+                #print(stops)
+
+                if stop:
+                    stop = stop[:-1]
+                    if stop in stops:
+                        #STOPPED_AT enum is 1
+                        if status == 1:
+                            #logic for updating stop
+                            stops[stop]["stopped_at"] = 1
+                        else:
+                            #logic for no train at stop
+                            stops[stop]["stopped_at"] = 0
 
                 if not trip.is_valid():
                     continue
@@ -175,6 +209,7 @@ class Mtapi(object):
         with self._read_lock:
             self._routes = routes
             self._stations = stations
+            self._stops = stops
 
     def last_update(self):
         return self._last_update
@@ -205,6 +240,12 @@ class Mtapi(object):
 
         out.sort(key=lambda x: x['name'])
         return out
+    
+    def all_routes(self):
+        if self.is_expired():
+            self._update()
+        
+        return self._stops
 
     def get_by_id(self, ids):
         if self.is_expired():
